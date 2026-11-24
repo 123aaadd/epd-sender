@@ -1,0 +1,296 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0e1116">
+<title>EPD Sender · 墨水屏传图</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand">
+    <div class="logo">EPD</div>
+    <div class="brand-text">
+      <h1>EPD Sender</h1>
+      <p>720×480 · 64 色墨水屏传图工具</p>
+    </div>
+  </div>
+  <div class="status" id="status" data-state="idle">
+    <span class="dot"></span>
+    <span id="statusText">未连接</span>
+  </div>
+  <div class="batt" id="battBadge" hidden title="电池电压">
+    <span class="batt-ico"><i id="battFill" class="ok" style="width:0%"></i></span>
+    <span id="battText">--</span>
+  </div>
+</header>
+
+<main class="layout">
+
+  <section class="stage-col">
+    <div class="stage" id="stage">
+      <canvas id="view"></canvas>
+      <div class="crop" id="crop" hidden>
+        <i class="c tl"></i><i class="c tr"></i><i class="c bl"></i><i class="c br"></i>
+      </div>
+      <div class="empty" id="empty">
+        <div class="empty-icon">🖼</div>
+        <p class="empty-title">还没有图片</p>
+        <button class="btn primary" id="pickBtn2">选择图片</button>
+        <p class="tiny">也可以把图片直接拖到这里</p>
+      </div>
+      <div class="stage-hint" id="stageHint" hidden>拖动图片 · 滚轮或双指缩放</div>
+    </div>
+
+    <div class="stagebar">
+      <button class="icon-btn" id="zoomOut" title="缩小" aria-label="缩小">−</button>
+      <input type="range" id="zoom" min="0.2" max="6" step="0.01" value="1" aria-label="缩放">
+      <button class="icon-btn" id="zoomIn" title="放大" aria-label="放大">＋</button>
+      <span class="zoomval" id="zoomVal">100%</span>
+      <span class="spacer"></span>
+      <button class="btn ghost" id="fitBtn">适应</button>
+      <button class="btn ghost" id="resetBtn">复位</button>
+    </div>
+  </section>
+
+  <aside class="panel">
+
+    <section class="card">
+      <h2>取景</h2>
+      <div class="seg" id="segOrient" role="group" aria-label="取景方向">
+        <button data-val="landscape" class="on">横屏 720×480</button>
+        <button data-val="portrait">竖图·转90°</button>
+      </div>
+      <p class="hint">框选区域的宽高比会跟着切换，取景会保持在画面中心。</p>
+    </section>
+
+    <section class="card">
+      <h2>图片</h2>
+      <div class="row">
+        <button class="btn primary" id="pickBtn">选择图片</button>
+        <button class="btn ghost" id="clearBtn" disabled>清除</button>
+      </div>
+      <p class="filename" id="fileName">未选择</p>
+    </section>
+
+    <section class="card">
+      <h2>颜色模式</h2>
+      <div class="seg" id="segMode" role="group" aria-label="颜色模式">
+        <button data-val="c64" class="on">64 色</button>
+        <button data-val="c6">6 色</button>
+        <button data-val="bw">黑白</button>
+      </div>
+
+      <label class="switch">
+        <input type="checkbox" id="dither" checked>
+        <span class="track"></span>
+        <span class="switch-label">抖动（Dithering）</span>
+      </label>
+
+      <label class="switch">
+        <input type="checkbox" id="neutral" checked>
+        <span class="track"></span>
+        <span class="switch-label">中性保护（灰阶不偏色）</span>
+      </label>
+      <div class="slider-row">
+        <span>中性强度</span>
+        <input type="range" id="nstr" min="0" max="100" step="5" value="100">
+        <span class="val" id="nstrVal">100%</span>
+      </div>
+
+      <div class="slider-row">
+        <span>屏白强度</span>
+        <input type="range" id="wbstr" min="0" max="150" step="5" value="50">
+        <span class="val" id="wbstrVal">50%</span>
+      </div>
+      <label class="switch">
+        <input type="checkbox" id="paperSim">
+        <span class="track"></span>
+        <span class="switch-label">纸面模拟（预览按屏白亮度 72% 显示）</span>
+      </label>
+      <label class="switch">
+        <input type="checkbox" id="skyBlue">
+        <span class="track"></span>
+        <span class="switch-label">天空走蓝（淡青不用青绿格，防发绿）</span>
+      </label>
+      <label class="switch">
+        <input type="checkbox" id="hsvMode">
+        <span class="track"></span>
+        <span class="switch-label">HSV 匹配（色相优先，抗串色）</span>
+      </label>
+      <div class="slider-row">
+        <span>去黄补偿</span>
+        <input type="range" id="cool" min="0" max="100" step="5" value="0">
+        <span class="val" id="coolVal">0%</span>
+      </div>
+
+      <div class="slider-row">
+        <span>旋转</span>
+        <input type="range" id="rotate" min="-180" max="180" step="1" value="0">
+        <span class="val" id="rotateVal">0°</span>
+      </div>
+      <div class="row tight">
+        <button class="btn ghost sm" id="rotL">↺ 90°</button>
+        <button class="btn ghost sm" id="rotR">↻ 90°</button>
+      </div>
+
+      <div class="slider-row">
+        <span>亮度</span>
+        <input type="range" id="bright" min="-60" max="60" step="1" value="0">
+        <span class="val" id="brightVal">0</span>
+      </div>
+      <div class="slider-row">
+        <span>对比度</span>
+        <input type="range" id="contrast" min="-60" max="60" step="1" value="0">
+        <span class="val" id="contrastVal">0</span>
+      </div>
+      <div class="slider-row">
+        <span>曝光</span>
+        <input type="range" id="expo" min="-100" max="100" step="5" value="0">
+        <span class="val" id="expoVal">0</span>
+      </div>
+      <div class="slider-row">
+        <span>光感</span>
+        <input type="range" id="ambi" min="-100" max="100" step="5" value="0">
+        <span class="val" id="ambiVal">0</span>
+      </div>
+      <div class="slider-row">
+        <span>高光</span>
+        <input type="range" id="high" min="-100" max="100" step="5" value="0">
+        <span class="val" id="highVal">0</span>
+      </div>
+      <div class="slider-row">
+        <span>阴影</span>
+        <input type="range" id="shad" min="-100" max="100" step="5" value="0">
+        <span class="val" id="shadVal">0</span>
+      </div>
+      <div class="slider-row">
+        <span>色温</span>
+        <input type="range" id="temp" min="-100" max="100" step="5" value="0">
+        <span class="val" id="tempVal">0</span>
+      </div>
+      <div class="slider-row">
+        <span>色调</span>
+        <input type="range" id="tint" min="-100" max="100" step="5" value="0">
+        <span class="val" id="tintVal">0</span>
+      </div>
+      <div class="slider-row">
+        <span>去朦胧</span>
+        <input type="range" id="dehaze" min="0" max="100" step="5" value="0">
+        <span class="val" id="dehazeVal">0%</span>
+      </div>
+      <div class="slider-row">
+        <span>抖动量</span>
+        <input type="range" id="dstr" min="0" max="100" step="5" value="0">
+        <span class="val" id="dstrVal">0%</span>
+      </div>
+      <div class="slider-row">
+        <span>饱和</span>
+        <input type="range" id="sat" min="0" max="80" step="5" value="0">
+        <span class="val" id="satVal">0%</span>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>预览 <span class="badge" id="previewBadge">720×480</span></h2>
+      <div class="pickinfo" id="pickInfo">把鼠标移到预览上，可查看「原色 -> 色号 -> 上屏色」</div>
+      <div class="preview-wrap" id="previewWrap">
+        <canvas id="preview"></canvas>
+      </div>
+      <div class="row tight">
+        <div class="seg sm" id="segPixZoom" role="group" aria-label="预览倍率">
+          <button data-val="1" class="on">1×</button>
+          <button data-val="2">2×</button>
+          <button data-val="4">4×</button>
+        </div>
+        <span class="spacer"></span>
+        <button class="btn ghost sm" id="dlBtn" disabled>下载 .bin</button>
+      </div>
+      <ul class="stats">
+        <li><span>目标尺寸</span><b id="statSize">—</b></li>
+        <li><span>索引数据</span><b id="statBytes">—</b></li>
+        <li><span>调色板</span><b id="statPal">—</b></li>
+      </ul>
+    </section>
+
+    <section class="card">
+      <h2>蓝牙</h2>
+      <div class="row">
+        <button class="btn primary" id="connectBtn">连接设备</button>
+        <button class="btn ghost" id="disconnectBtn" disabled>断开</button>
+      </div>
+      <p class="filename" id="deviceName">未连接</p>
+      <label class="switch">
+        <input type="checkbox" id="allDevices">
+        <span class="track"></span>
+        <span class="switch-label">找不到时列出所有设备</span>
+      </label>
+      <p class="hint" id="bleHint">需要 Chrome / Edge（桌面或安卓）。iOS 的 Safari 不支持 Web Bluetooth。</p>
+      <p class="hint" id="bleDiag"></p>
+      <button class="btn ghost sm" id="copyLinkBtn" hidden>复制本页链接</button>
+    </section>
+
+    <section class="card">
+      <h2>NFC 名片 <span class="badge">QQ 资料卡</span></h2>
+      <label class="field">
+        <span>目标 QQ 号（5–12 位数字）</span>
+        <input type="text" id="nfcUin" inputmode="numeric" maxlength="12" placeholder="2070842081">
+      </label>
+      <label class="field">
+        <span>口令（4 位数字）</span>
+        <input type="password" id="nfcPass" inputmode="numeric" maxlength="4" value="8888" autocomplete="off">
+      </label>
+      <div class="row">
+        <button class="btn primary" id="nfcWriteBtn">写入设备</button>
+        <button class="btn ghost" id="nfcReadBtn">读取当前</button>
+        <button class="btn ghost" id="panelProbeBtn">面板自检</button>
+      </div>
+      <p class="hint" id="nfcHint">写入后设备立即更新卡内的资料卡深链并存进 Flash，断电重启后仍有效。默认口令 8888。</p>
+    </section>
+
+    <section class="card">
+      <h2>发送</h2>
+      <label class="field">
+        <span>文本内容</span>
+        <textarea id="payload" rows="2" maxlength="512">HELLO WORLD</textarea>
+      </label>
+      <button class="btn primary wide" id="sendBtn" disabled>发送文本</button>
+      <button class="btn ghost wide" id="sendImgBtn" disabled title="把右侧转换结果以 48 色两平面传给设备">发送图像（约 60~90 秒）</button>
+      <p class="hint" id="sendHint">图像按 48 色两平面发送，设备收完再做三次刷新，全程约 60~90 秒。传输期间请别熄屏。</p>
+      <div class="progress" id="progress" hidden><i id="progressBar"></i></div>
+    </section>
+
+    <section class="card">
+      <h2>固件升级 <span class="badge">OTA</span></h2>
+      <label class="field">
+        <span>固件（.bin）</span>
+        <input type="file" id="fwFile" accept=".bin,application/octet-stream">
+      </label>
+      <button class="btn ghost wide" id="otaBtn" disabled
+        title="通过蓝牙把新固件写进设备的暂存区，设备自己拷贝并重启">升级固件</button>
+      <p class="hint" id="otaHint">选 build\ble_epd.bin（约 160 KB）。上传约 10~20 秒，之后设备自动拷贝并重启，屏幕上会出现新版本号。</p>
+      <button class="btn wide" id="otaSrvBtn" disabled>从服务器升级到最新固件（免选文件）</button>
+      <div class="progress" id="otaProgress" hidden><i id="otaBar"></i></div>
+    </section>
+
+    <section class="card log-card">
+      <h2>日志</h2>
+      <pre class="log" id="log"></pre>
+    </section>
+
+  </aside>
+</main>
+
+<footer class="foot">
+      <span id="webVer" class="dim">网页版本 —</span>
+      <span class="dim">·</span>
+  <span>EPD037A02 · JD7601 · 4bpp 172800 B/帧</span>
+  <span id="footState">空闲</span>
+</footer>
+
+<input type="file" id="file" accept="image/*" hidden>
+<script src="app.js?v=82w"></script>
+</body>
+</html>
