@@ -5,7 +5,7 @@
   'use strict';
 
   /* 网页版本：每次改动都改这里，界面和日志都会显示，用来确认浏览器没有用缓存 */
-  const WEB_VER = 'v84w';
+  const WEB_VER = 'v85w';
 
   /* ============================ 调色板 ============================ */
   /* 64 色表来自固件 epd/Display.h 的实测数据（8x8，索引 = (色相<<3)|明度） */
@@ -121,30 +121,6 @@
 
   function setFoot(s) {
     $('footState').textContent = s;
-  }
-
-  /* 拖动滑块时 convert() 会被连续调用，色号日志做 1.5 秒去抖 */
-  let gCodeLogT = 0;
-  function logCodes(txt) {
-    const now = Date.now();
-    if (now - gCodeLogT < 1500) return;
-    gCodeLogT = now;
-    log('色号分布 top6 · ' + txt);
-  }
-
-  /* 等待期间的进度心跳：设备在清屏/装波形时不上报，靠它让用户看到没卡死 */
-  let gBusyTimer = null;
-  function startBusyTicker(text) {
-    stopBusyTicker();
-    const t0 = Date.now();
-    gBusyTimer = setInterval(() => {
-      const s = Math.round((Date.now() - t0) / 1000);
-      setFoot(text + '… 已 ' + s + ' 秒');
-      if (s > 0 && s % 10 === 0) log(text + '…已 ' + s + ' 秒（这一阶段设备不上报，属正常，请留在本页）');
-    }, 1000);
-  }
-  function stopBusyTicker() {
-    if (gBusyTimer) { clearInterval(gBusyTimer); gBusyTimer = null; }
   }
 
   /* ============================ 目标尺寸 / 取景框 ============================ */
@@ -562,7 +538,16 @@
   }
 
   /* ============================ 转换主流程 ============================ */
-  function convert() {
+    /* v85w：色号分布日志（1.5 s 去抖） */
+  let gCodeT = 0;
+  function logCodes(txt) {
+    const now = Date.now();
+    if (now - gCodeT < 1500) return;
+    gCodeT = now;
+    log(txt);
+  }
+
+function convert() {
     if (!S.img) return;
     const t0 = performance.now();
     const { w, h } = targetSize();
@@ -730,26 +715,22 @@
     }
 
     S.indices = idx;
-
-    /* v84w 诊断：把这张图真正用到的色号统计出来（前 6 名）。
-       屏上颜色不对时，先看这里给的号——网页说 0x38 而屏上是黄，
-       那就不是量化的问题，而是数据/面板那一段。 */
-    try {
+    /* v85w：把真正发给屏的色号分布打出来（只统计、不发数据）
+       用途：判断屏上偏色是网页选错色号，还是固件/面板那段的问题。
+       1.5 秒去抖，拖滑块时不会刷屏。 */
+    {
       const hist = new Uint32Array(pal.length);
-      for (let i = 0; i < N; i++) hist[idx[i]]++;
-      const order = [];
-      for (let k = 0; k < hist.length; k++) if (hist[k]) order.push(k);
-      order.sort((a, b) => hist[b] - hist[a]);
-      let txt = '';
-      for (let i = 0; i < Math.min(6, order.length); i++) {
-        const k = order[i];
-        const c = pal[k];
-        txt += (i ? ' · ' : '') + '0x' + (k < 16 ? '0' : '') + k.toString(16).toUpperCase() +
-          ' ' + ((hist[k] * 100) / N).toFixed(1) + '%';
-      }
-      S.codeHist = txt;
-      logCodes(txt);
-    } catch (_) { /* 统计不能影响出图 */ }
+      const nTot = idx.length;
+      for (let i2 = 0; i2 < nTot; i2++) hist[idx[i2]]++;
+      const top = [];
+      for (let k = 0; k < hist.length; k++) if (hist[k]) top.push([k, hist[k]]);
+      top.sort((x, y) => y[1] - x[1]);
+      S.codeHist = top.slice(0, 6).map(([k, n]) =>
+        '0x' + (k < 16 ? '0' : '') + k.toString(16).toUpperCase() + ' ' +
+        (100 * n / nTot).toFixed(1) + '%').join(' · ');
+      logCodes('色号分布 top6 · ' + S.codeHist);
+    }
+
 
     // 4bpp 打包（高 nibble = 左像素）
     const packed = new Uint8Array(N >> 1);
@@ -1248,7 +1229,6 @@
   const NTF_MTU = 0xb1;
   const NTF_PROGRESS = 0xb2;
   const ST = { IDLE: 0, ARMED: 1, REFRESHING: 2, DONE: 3, ERROR: 4, RETRY: 5, OTA_READY: 6, OTA_DONE: 7 };
-  let gArmForce = false;   /* v84w：断链重发 'I' 后放宽 armed 判定 */
 
   let gMtu = 23;
   const NTF_VER = 0xb3;      /* 固件版本通知（v27 起） */
@@ -1483,9 +1463,9 @@ let gFwOld = false;   /* 连上后 3 秒一条通知都没有 → 板子里是�
   function waitArmedFresh() {
     return new Promise((resolve, reject) => {
       const t0 = Date.now();
-      const TOTAL = 300000;
-      const IDLE = 150000;
-      let leftHigh = !!gArmForce;
+      const TOTAL = 240000;
+      const IDLE = 60000;
+      let leftHigh = false;
       let done = false;
       const timer = setInterval(() => {
         if (done) return;
@@ -1507,72 +1487,6 @@ let gFwOld = false;   /* 连上后 3 秒一条通知都没有 → 板子里是�
         }
       }, 200);
     });
-  }
-
-  /* 等自动重连把链路拿回来（autoReconnect 一直在后台重试） */
-  async function waitConnected(ms) {
-    const t0 = Date.now();
-    while (Date.now() - t0 < ms) {
-      if (S.connected && S.ch) return true;
-      await sleep(400);
-    }
-    return false;
-  }
-
-  /* v84w：发 'I' 并等面板就绪。设备在这段要清屏 + 装载三相波形（30~45 秒）
-     并且全程不上报，手机很容易在这段空档被监督超时踢掉。
-     这里失败不当场放弃：等链路回来再重发 'I'，最多 3 轮。 */
-  async function beginPanelSession(fwMode, markNoti) {
-    let lastErr = null;
-    for (let attempt = 1; attempt <= 3; attempt++) {
-      if (attempt > 1) {
-        if (!(await waitConnected(60000))) {
-          throw new Error('蓝牙链路一直没恢复，请点「连接设备」重连后再发');
-        }
-        await sleep(600);
-      }
-      try {
-        await writeOne([0x49, fwMode]);   /* 'I' + 模式 */
-        setFoot('等面板启动…');
-        startBusyTicker('面板清屏/装载波形中');
-        /* 断链重来后，设备可能早就 armed 了，放宽一次相位判定 */
-        if (attempt > 1) gArmForce = true;
-        const st = await waitArmedFresh();
-        stopBusyTicker();
-        gArmForce = false;
-        return st;
-      } catch (e) {
-        stopBusyTicker();
-        gArmForce = false;
-        lastErr = e;
-        const msg = e && e.message ? e.message : String(e);
-        if (attempt === 3) break;
-        log('面板启动阶段没等到就绪（' + msg + '），等链路恢复后重发 ' + (attempt + 1) + '/3', 'warn');
-        if (!S.connected && gNotiCount === markNoti) {
-          setFoot('断链，等重连…');
-        }
-      }
-    }
-    throw new Error(gFwOld ? '设备没有任何回应——板子里是旧固件（只支持显示文本）'
-      : '面板没有就绪：' + (lastErr && lastErr.message ? lastErr.message : lastErr));
-  }
-
-  /* 平面发送：整轮失败（多为断链）时等重连再来一轮 */
-  async function sendPlaneResilient(data, planeNo, maxTry) {
-    let lastErr = null;
-    for (let round = 1; round <= 3; round++) {
-      try {
-        return await sendPlaneWithRetry(data, planeNo, maxTry);
-      } catch (e) {
-        lastErr = e;
-        if (round === 3) break;
-        log('平面 ' + planeNo + ' 第 ' + round + ' 轮失败：' + (e && e.message ? e.message : e) +
-          '，等链路恢复后重传', 'warn');
-        if (!(await waitConnected(60000))) break;
-        await sleep(800);
-      }
-    }
-    throw lastErr || new Error('平面 ' + planeNo + ' 发送失败');
   }
 
   function waitAny(mark, list, ms, idleMs) {
@@ -2255,16 +2169,23 @@ let gFwOld = false;   /* 连上后 3 秒一条通知都没有 → 板子里是�
         planes.length + ' 个平面 × ' + planes[0].length + ' 字节');
 
       const markNoti = gNotiCount;
-      /* v84w：'I' 之后设备清屏+装波形 30~45 秒不上报，期间断链会自动等重连再试 */
-      const st = await beginPanelSession(mode.fwMode, markNoti);
-      gFwOld = gFwOld || (gNotiCount === markNoti);
+      await writeOne([0x49, mode.fwMode]); /* 'I' + 模式（0=64色两平面 1=六色 2=黑白） */
+      setFoot('等面板启动…');
+      let st;
+      try {
+        st = await waitArmedFresh();
+      } catch (e) {
+        throw new Error(gFwOld || gNotiCount === markNoti
+          ? '设备没有任何回应——板子里是旧固件（只支持显示文本）'
+          : '面板没有就绪：' + (e && e.message ? e.message : e));
+      }
       if (st !== ST.ARMED) throw new Error('面板启动失败（状态 ' + stateName(st) + '）');
 
       for (let p = 0; p < planes.length; p++) {
         const last = (p === planes.length - 1);
 
         setFoot('发送第 ' + (p + 1) + '/' + planes.length + ' 个平面…');
-        st = await sendPlaneResilient(planes[p], p + 1, 3);
+        st = await sendPlaneWithRetry(planes[p], p + 1, 3);
         if (last) {
           if (st !== ST.DONE) throw new Error('刷屏失败：' + stateName(st));
         } else {
@@ -2280,7 +2201,6 @@ let gFwOld = false;   /* 连上后 3 秒一条通知都没有 → 板子里是�
       log('传图失败：' + msg, 'err');
       setFoot('传图失败');
     } finally {
-      stopBusyTicker();
       S.sending = false;
       setTimeout(() => setProgress(0), 800);
       $('sendImgBtn').disabled = !S.indices;
