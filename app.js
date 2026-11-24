@@ -5,7 +5,7 @@
   'use strict';
 
   /* 网页版本：每次改动都改这里，界面和日志都会显示，用来确认浏览器没有用缓存 */
-  const WEB_VER = 'v85w';
+  const WEB_VER = 'v86w';
 
   /* ============================ 调色板 ============================ */
   /* 64 色表来自固件 epd/Display.h 的实测数据（8x8，索引 = (色相<<3)|明度） */
@@ -2114,14 +2114,23 @@ let gFwOld = false;   /* 连上后 3 秒一条通知都没有 → 板子里是�
   }
 
   async function sendImage() {
+    /* v86w：上一张还在传时不许开第二路。
+       两路并发会把固件的阶段机打乱（日志里出现过两个流程同时发平面 1、
+       阶段号在 写色相平面/写明度平面/刷新相 之间乱跳）。 */
+    if (S.sending) {
+      log('上一张还在传输中，等它结束再发（并发会把面板状态机打乱）', 'warn');
+      return;
+    }
     keepAwake();
     S.sending = true;
     log('开始传输：约需 2~4 分钟，请保持手机屏幕常亮、不要切后台或锁屏（锁屏会断蓝牙）', 'ok');
     if (!S.connected || !S.ch) {
+      S.sending = false;
       log('还没连接设备', 'err');
       return;
     }
     if (!S.indices) {
+      S.sending = false;
       log('还没有图片', 'err');
       return;
     }
