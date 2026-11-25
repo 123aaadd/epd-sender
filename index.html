@@ -206,7 +206,8 @@
           <button data-val="4">4×</button>
         </div>
         <span class="spacer"></span>
-        <button class="btn ghost sm" id="calibBtn" title="生成 8×8 色号测试卡：行 = 色相 0..7，列 = 明度 0..7">测色卡</button>
+        <button class="btn ghost sm" id="swatchBtn" title="在当前图上压一条 8 格已知色标（0x38/0x39/0x3A/0x3B/0x2C/0x05/0x06/0x0F），用于和屏上可疑区域同框比对">叠加色标</button>
+      <button class="btn ghost sm" id="calibBtn" title="生成 8×8 色号测试卡：行 = 色相 0..7，列 = 明度 0..7">测色卡</button>
         <button class="btn ghost sm" id="dlBtn" disabled>下载 .bin</button>
       </div>
       <ul class="stats">
@@ -292,6 +293,6 @@
 </footer>
 
 <input type="file" id="file" accept="image/*" hidden>
-<script src="app.js?v=86w"></script>
+<script src="app.js?v=87w"></script>
 </body>
 </html>
