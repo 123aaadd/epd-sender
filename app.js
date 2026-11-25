@@ -5,7 +5,7 @@
   'use strict';
 
   /* 网页版本：每次改动都改这里，界面和日志都会显示，用来确认浏览器没有用缓存 */
-  const WEB_VER = 'v86w';
+  const WEB_VER = 'v87w';
 
   /* ============================ 调色板 ============================ */
   /* 64 色表来自固件 epd/Display.h 的实测数据（8x8，索引 = (色相<<3)|明度） */
@@ -818,6 +818,51 @@ function convert() {
     if (S.connected) $('sendImgBtn').disabled = false;
     log('已生成 8×8 测色卡：行 = 色相 0..7（上→下），列 = 明度 0..7（左→右）；点「发送图像」上屏', 'ok');
     setFoot('测色卡已就绪');
+  }
+
+  /* ========================== 色标叠加（取证用） ========================== */
+  /* 保留当前这张图的色号，只在右边缘压一条 8 格已知色标：
+     0x38 / 0x39 / 0x3A / 0x3B / 0x2C / 0x05 / 0x06 / 0x0F。
+     一次刷屏、一张照片里同时有「可疑区域」和「已知色号的样卡」，
+     曝光和光线完全一致，就能直接判定可疑区域到底是哪个色号：
+       · 样卡 0x38 是暗的、可疑区域是黄的  -> 可疑区域不是 0x38（网页选色问题）
+       · 样卡 0x38 也是黄的                -> 面板/波形问题
+     只复制 S.indices 再涂条，不改量化结果、不改调色板。 */
+  function buildSwatchOverlay() {
+    if (!S.indices) {
+      log('先从下面选一张图，再点「叠加色标」', 'err');
+      return;
+    }
+    const { w, h } = targetSize();
+    const idx = new Uint8Array(S.indices);
+    const bands = [0x38, 0x39, 0x3A, 0x3B, 0x2C, 0x05, 0x06, 0x0F];
+    const bw = 72;
+    const x0 = Math.max(0, w - bw - 6);
+    const bh = Math.floor(h / bands.length);
+    for (let r = 0; r < bands.length; r++) {
+      const yEnd = (r === bands.length - 1) ? h : (r + 1) * bh;
+      for (let y = r * bh; y < yEnd; y++) {
+        for (let x = x0; x < x0 + bw; x++) idx[y * w + x] = bands[r];
+        for (let x = x0 - 2; x < x0; x++) if (x >= 0) idx[y * w + x] = 0x00;
+      }
+    }
+    S.mode = 'c64';
+    const seg = $('segMode');
+    if (seg) {
+      Array.from(seg.children).forEach((b) => b.classList.toggle('on', b.dataset.val === 'c64'));
+    }
+    S.indices = idx;
+    const codes = MODES.c64.code;
+    const packed = new Uint8Array((w * h) >> 1);
+    for (let i = 0; i < packed.length; i++) {
+      packed[i] = (codes[idx[i * 2]] << 4) | codes[idx[i * 2 + 1]];
+    }
+    S.packed = packed;
+    drawPreview();
+    updateStats();
+    if (S.connected) $('sendImgBtn').disabled = false;
+    log('已叠加色标条（右侧 8 格，自上而下 0x38 0x39 0x3A 0x3B 0x2C 0x05 0x06 0x0F）；点「发送图像」', 'ok');
+    setFoot('色标已叠加');
   }
 
   /* ============================ 交互：拖动 / 缩放 ============================ */
@@ -2167,6 +2212,30 @@ let gFwOld = false;   /* 连上后 3 秒一条通知都没有 → 板子里是�
       planes = [single];
     }
 
+    /* v87w：把「真正要发出去的字节」反解成色号统计。
+       排查偏色时看的是设备收到的色号，不是 S.indices 的——
+       两者可能因为重复 convert（日志被 1.5 s 去抖吃掉）、模式切换而不一致。
+       这里只读 planes[]，不改任何一个字节。 */
+    if (planes.length === 2) {
+      const hb = new Uint32Array(64);
+      const p0 = planes[0], p1 = planes[1];
+      for (let i = 0; i < p0.length; i++) {
+        hb[((p0[i] >> 4) * 8) + (p1[i] >> 4)]++;
+        hb[((p0[i] & 15) * 8) + (p1[i] & 15)]++;
+      }
+      const tot = p0.length * 2;
+      const list = [];
+      for (let k = 0; k < 64; k++) if (hb[k]) list.push([k, hb[k] * 100 / tot]);
+      list.sort((a, b) => b[1] - a[1]);
+      let yrow = 0;
+      for (let k = 0x39; k <= 0x3F; k++) yrow += hb[k];
+      log('发送字节反解 top8 · ' + list.slice(0, 8).map((x) =>
+        '0x' + x[0].toString(16).toUpperCase().padStart(2, '0') + ' ' +
+        x[1].toFixed(1) + '%').join(' · '));
+      log('黄行 0x39-0x3F ' + (yrow * 100 / tot).toFixed(2) + '% · 0x38 ' +
+        (hb[0x38] * 100 / tot).toFixed(2) + '% · 用到 ' + list.length + '/64 个色号');
+    }
+
     $('sendImgBtn').disabled = true;
     $('sendBtn').disabled = true;
     setFoot('开始传图');
@@ -2221,6 +2290,8 @@ let gFwOld = false;   /* 连上后 3 秒一条通知都没有 → 板子里是�
 
   const calibBtn = $('calibBtn');
   if (calibBtn) calibBtn.addEventListener('click', buildCalibCard);
+  const swatchBtn = $('swatchBtn');
+  if (swatchBtn) swatchBtn.addEventListener('click', buildSwatchOverlay);
 
   /* ============================ OTA 固件升级 ============================ */
   function setOtaProgress(p) {
